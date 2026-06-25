@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>心智成长测评 · MBTI × 心智阶位</title>
+<!--
+  ============================================================================
+  心智成长测评 —— 静态 H5 测评应用 (v0.2)
+  ----------------------------------------------------------------------------
+  · 纯原生 HTML/CSS/JS，零外部依赖、零构建、零后端，可离线双击打开 (file://)。
+  · 用普通 <script src> 顺序加载（不用 ES module，避免 file:// 的 CORS 限制）。
+  · 题库唯一真实来源：../自研题库v0.1.md（A20 + B10 + C3，逐题录入未改写）。
+  · 阶位中文意象名/颜色/文案：../阶位话术与报告文案.md。
+  ----------------------------------------------------------------------------
+  文件分工：
+    questions.js  —— 题库数据 + 阶位/类型元数据
+    styles.css    —— 样式（移动优先）
+    app.js        —— 流程控制 + 计分 + 准确性保障 + 结果渲染
+  ============================================================================
+-->
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="app">
+
+  <!-- 进度条（答题阶段显示） -->
+  <div class="progress-wrap" id="progressWrap" style="display:none;">
+    <div class="progress-meta">
+      <span id="progressLabel">第一部分</span>
+      <span id="progressCount">1 / 33</span>
+    </div>
+    <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+  </div>
+
+  <!-- 内容挂载点 -->
+  <div id="stage"></div>
+
+</div>
+
+<!-- 顺序很重要：先数据，后逻辑 -->
+<script src="questions.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
