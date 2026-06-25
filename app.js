@@ -702,6 +702,15 @@
       ? MBTI_VISUAL[a.type]
       : ((typeof MBTI_VISUAL !== "undefined" && MBTI_VISUAL.DEFAULT) || { emoji: "🧬", gradient: ["#9A938B", "#C8B9A8"] });
 
+    // 精致角色头像（DiceBear adventurer 内联 SVG）。仅 16 个「纯」类型有；
+    // 含 X 中间维或缺失时 avatarSvg 为 null，下方渲染会回落到 emoji+渐变（兜底）。
+    const avatarSvg = (typeof MBTI_AVATARS !== "undefined" && MBTI_AVATARS[a.type])
+      ? MBTI_AVATARS[a.type] : null;
+    // 头像圆内层 HTML：有 SVG 用 SVG，否则用原 emoji。
+    const avatarInner = avatarSvg
+      ? `<span class="type-avatar-svg">${avatarSvg}</span>`
+      : `<span class="type-avatar-emoji">${visual.emoji}</span>`;
+
     /**
      * 每维度「偏好强度」分档（用户校准：距中点 ≤3 分 = 弱偏好/接近中间）。
      *   gap = |sum − mid|（5 题制：0..10；3 题制：0..6）
@@ -865,8 +874,8 @@
       <div class="screen active" style="padding-top:8px;">
         <div class="result-hero">
           <div class="eyebrow">你的性格类型</div>
-          <div class="type-avatar" style="background:linear-gradient(135deg, ${visual.gradient[0]}, ${visual.gradient[1]});">
-            <span class="type-avatar-emoji">${visual.emoji}</span>
+          <div class="type-avatar ${avatarSvg ? "has-svg" : ""}" style="background:linear-gradient(135deg, ${visual.gradient[0]}, ${visual.gradient[1]});">
+            ${avatarInner}
           </div>
           <div class="mbti-badge">${a.type}</div>
           <div class="mbti-name">${esc(blurb)}</div>
@@ -987,8 +996,9 @@
 
         <div class="actions">
           <button class="btn btn-ghost" id="historyBtn" style="display:none;">我的记录</button>
+          <button class="btn btn-primary" id="shareCardBtn">生成我的分享卡</button>
           <button class="btn btn-ghost" id="exportBtn">导出 JSON</button>
-          <button class="btn btn-primary" id="restartBtn">重新测试</button>
+          <button class="btn btn-ghost" id="restartBtn">重新测试</button>
         </div>
       </div>
     `);
@@ -1031,6 +1041,22 @@
     // 导出 JSON（复制结果）
     screen.querySelector("#exportBtn").onclick = () => {
       copyText(JSON.stringify(payload, null, 2));
+    };
+
+    // 生成分享卡（原生 Canvas 手绘，零依赖、离线可用）
+    screen.querySelector("#shareCardBtn").onclick = () => {
+      openShareCard({
+        type: a.type,
+        nickname: blurbNickname(blurb),
+        blurb: blurb,
+        stage: stage,
+        stageGolden: firstSentence(stageCopy.portrait),
+        visual: visual,
+        avatarSvg: avatarSvg,
+        confidence: fused.confidence,
+        isInterval: b.isInterval,
+        intervalNames: b.isInterval ? [b.lower.name, b.upper.name] : null,
+      });
     };
 
     screen.querySelector("#restartBtn").onclick = () => {
@@ -1148,6 +1174,306 @@
       ok ? done() : fail();
     } catch (e) { fail(); }
   }
+
+  /* ==========================================================================
+     4c. 分享结果卡（原生 Canvas 手绘，零依赖、离线 file:// 可用）
+     --------------------------------------------------------------------------
+     竖版 1080×1440（3:4，适合手机屏/朋友圈）。内容：
+       顶部  产品名 + slogan
+       中部  类型头像(大,渐变圆底) + MBTI 四字母 + 原创昵称 + 阶位胶囊 + 阶位金句
+       底部  六色光谱条 + 引导语 + 二维码占位(“长按识别”) + 免责小字
+     头像：把内联 SVG 转成 data:URL 经 Image 画到 canvas（浏览器原生，离线可用）。
+     生成后把图显示在覆盖层，移动端提示“长按图片保存/分享”，并提供「保存图片」按钮。
+     ========================================================================== */
+
+  // 取昵称（MBTI_BLURB 形如「昵称——一句话…」；无破折号则整句当昵称）
+  function blurbNickname(blurb) {
+    const s = (blurb || "").trim();
+    const idx = s.indexOf("——");
+    return idx > 0 ? s.slice(0, idx).trim() : s;
+  }
+  // 取一段话的第一句（用于阶位金句）；中文句号/感叹/问号/分号断句。
+  function firstSentence(text) {
+    const s = (text || "").trim();
+    const m = s.match(/^[^。！？!?；;]+[。！？!?；;]?/);
+    let r = m ? m[0].trim() : s;
+    if (r.length > 40) r = r.slice(0, 38) + "…";   // 太长再截断
+    return r;
+  }
+
+  // 把内联 SVG 字符串转成可被 Image 加载的 data URL（UTF-8 安全）。
+  function svgToDataUrl(svg) {
+    // 确保有 xmlns（DiceBear 输出已带，稳妥起见兜底）。
+    let s = svg;
+    if (!/xmlns=/.test(s)) s = s.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"');
+    // 用 encodeURIComponent + unescape 兼容中文/特殊字符的 base64；这里直接用 utf8 data url。
+    return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(s);
+  }
+
+  // 加载一张图（SVG dataURL）→ Promise<HTMLImageElement>；失败 resolve(null) 不阻断。
+  function loadImage(src) {
+    return new Promise((resolve) => {
+      try {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        img.src = src;
+      } catch (e) { resolve(null); }
+    });
+  }
+
+  // 圆角矩形路径
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  // 居中绘制多行文本（自动按宽度换行）；返回结束 y。
+  function drawWrapped(ctx, text, cx, y, maxW, lineH, maxLines) {
+    const chars = (text || "").split("");
+    const lines = [];
+    let cur = "";
+    for (const ch of chars) {
+      const test = cur + ch;
+      if (ctx.measureText(test).width > maxW && cur) {
+        lines.push(cur); cur = ch;
+        if (maxLines && lines.length === maxLines - 1) { /* 余下进最后一行 */ }
+      } else {
+        cur = test;
+      }
+    }
+    if (cur) lines.push(cur);
+    const use = maxLines ? lines.slice(0, maxLines) : lines;
+    if (maxLines && lines.length > maxLines) {
+      let last = use[maxLines - 1];
+      while (last && ctx.measureText(last + "…").width > maxW) last = last.slice(0, -1);
+      use[maxLines - 1] = last + "…";
+    }
+    use.forEach((ln, i) => ctx.fillText(ln, cx, y + i * lineH));
+    return y + use.length * lineH;
+  }
+
+  // 颜色工具：hex → rgba 字符串
+  function hexA(hex, a) {
+    const h = hex.replace("#", "");
+    const n = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h, 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+  }
+
+  // 主入口：构建并显示分享卡覆盖层。
+  async function openShareCard(data) {
+    showToast("正在生成分享卡…");
+    let dataUrl = null;
+    try {
+      dataUrl = await drawShareCard(data);
+    } catch (e) {
+      dataUrl = null;
+    }
+    showShareOverlay(dataUrl, data);
+  }
+
+  // 真正的 canvas 绘制；返回 PNG dataURL（失败抛错由上层兜底）。
+  async function drawShareCard(data) {
+    const W = 1080, H = 1440;
+    const canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("no 2d context");
+
+    const stage = data.stage || {};
+    const stageColor = stage.color || "#9A938B";
+    const g0 = (data.visual && data.visual.gradient && data.visual.gradient[0]) || "#9A938B";
+    const g1 = (data.visual && data.visual.gradient && data.visual.gradient[1]) || "#C8B9A8";
+
+    // ---- 背景：米色纸底 + 顶部类型渐变光晕 + 底部阶位色光晕 ----
+    ctx.fillStyle = "#FBF7F0";
+    ctx.fillRect(0, 0, W, H);
+    let halo = ctx.createRadialGradient(W / 2, 360, 60, W / 2, 360, 720);
+    halo.addColorStop(0, hexA(g1, 0.30));
+    halo.addColorStop(1, hexA(g1, 0));
+    ctx.fillStyle = halo; ctx.fillRect(0, 0, W, H);
+    let halo2 = ctx.createRadialGradient(W / 2, H - 120, 40, W / 2, H - 120, 560);
+    halo2.addColorStop(0, hexA(stageColor, 0.16));
+    halo2.addColorStop(1, hexA(stageColor, 0));
+    ctx.fillStyle = halo2; ctx.fillRect(0, 0, W, H);
+
+    // 外边框（细线，雅致）
+    ctx.strokeStyle = hexA(stageColor, 0.35);
+    ctx.lineWidth = 4;
+    roundRect(ctx, 28, 28, W - 56, H - 56, 44); ctx.stroke();
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    const FONT = '"PingFang SC","Microsoft YaHei","Hiragino Sans GB","Heiti SC",sans-serif';
+
+    // ---- 顶部：产品名 + slogan ----
+    ctx.fillStyle = "#8A7E6F";
+    ctx.font = `600 30px ${FONT}`;
+    ctx.fillText("心智成长测评", W / 2, 118);
+    ctx.fillStyle = "#B8AB99";
+    ctx.font = `400 24px ${FONT}`;
+    ctx.fillText("你是谁 × 你想得有多深", W / 2, 158);
+
+    // ---- 中部：头像（渐变圆底 + 内联 SVG）----
+    const cx = W / 2, avCy = 358, avR = 150;
+    // 圆底渐变
+    const ring = ctx.createLinearGradient(cx - avR, avCy - avR, cx + avR, avCy + avR);
+    ring.addColorStop(0, g0); ring.addColorStop(1, g1);
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, avCy, avR, 0, Math.PI * 2); ctx.closePath();
+    // 柔和阴影
+    ctx.shadowColor = hexA(g0, 0.45); ctx.shadowBlur = 38; ctx.shadowOffsetY = 14;
+    ctx.fillStyle = ring; ctx.fill();
+    ctx.restore();
+
+    // 头像 SVG 画进圆里（裁圆）。失败则画 emoji 兜底。
+    const img = data.avatarSvg ? await loadImage(svgToDataUrl(data.avatarSvg)) : null;
+    ctx.save();
+    ctx.beginPath(); ctx.arc(cx, avCy, avR - 4, 0, Math.PI * 2); ctx.clip();
+    if (img) {
+      const s = (avR - 4) * 2 * 0.98;
+      ctx.drawImage(img, cx - s / 2, avCy - (avR - 4) - 6 + ((avR - 4) * 2 - s) , s, s);
+    } else {
+      ctx.font = `120px ${FONT}`;
+      ctx.textBaseline = "middle";
+      ctx.fillText((data.visual && data.visual.emoji) || "🧬", cx, avCy + 6);
+      ctx.textBaseline = "alphabetic";
+    }
+    ctx.restore();
+    // 顶部高光
+    ctx.save();
+    ctx.beginPath(); ctx.ellipse(cx - 46, avCy - 92, 42, 22, -0.5, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255,255,255,0.30)"; ctx.fill();
+    ctx.restore();
+
+    // ---- MBTI 四字母 ----
+    ctx.fillStyle = "#3E3730";
+    ctx.font = `800 120px ${FONT}`;
+    ctx.fillText(data.type, cx, avCy + 270);
+
+    // ---- 原创昵称 ----
+    ctx.fillStyle = stageColor;
+    ctx.font = `700 46px ${FONT}`;
+    ctx.fillText(data.nickname || "", cx, avCy + 338);
+
+    // ---- 阶位胶囊（icon + 名称）----
+    const chipY = avCy + 392;
+    const icon = stage.icon || stage.emoji || "";
+    const stageName = stage.name || "";
+    ctx.font = `600 34px ${FONT}`;
+    const labelText = (data.isInterval && data.intervalNames)
+      ? `${data.intervalNames[0]} → ${data.intervalNames[1]}`
+      : stageName;
+    const chipText = `${icon}  心智阶位 · ${labelText}`;
+    const chipW = Math.min(ctx.measureText(chipText).width + 64, W - 160);
+    const chipH = 72;
+    roundRect(ctx, cx - chipW / 2, chipY, chipW, chipH, chipH / 2);
+    ctx.fillStyle = hexA(stageColor, 0.12); ctx.fill();
+    ctx.strokeStyle = hexA(stageColor, 0.5); ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.fillStyle = stageColor;
+    ctx.textBaseline = "middle";
+    ctx.fillText(chipText, cx, chipY + chipH / 2 + 2);
+    ctx.textBaseline = "alphabetic";
+
+    // ---- 阶位金句 ----
+    ctx.fillStyle = "#5A5048";
+    ctx.font = `400 32px ${FONT}`;
+    drawWrapped(ctx, data.stageGolden || "", cx, chipY + 150, W - 200, 46, 2);
+
+    // ---- 底部：六色光谱条 ----
+    const stagesSorted = (typeof STAGES !== "undefined")
+      ? [...STAGES].sort((a, b) => a.value - b.value) : [];
+    const barX = 120, barW = W - 240, barY = H - 250, barH = 26;
+    if (stagesSorted.length) {
+      const grad = ctx.createLinearGradient(barX, 0, barX + barW, 0);
+      stagesSorted.forEach((s, i) => grad.addColorStop(i / (stagesSorted.length - 1), s.color));
+      roundRect(ctx, barX, barY, barW, barH, barH / 2);
+      ctx.fillStyle = grad; ctx.fill();
+      // 当前阶位的标记点
+      const pos = (typeof stage.pos === "number") ? stage.pos : 50;
+      const px = barX + barW * (pos / 100);
+      ctx.beginPath(); ctx.arc(px, barY + barH / 2, 20, 0, Math.PI * 2);
+      ctx.fillStyle = "#fff"; ctx.fill();
+      ctx.lineWidth = 6; ctx.strokeStyle = stageColor; ctx.stroke();
+    }
+
+    // ---- 引导语 + 二维码占位 ----
+    ctx.fillStyle = "#8A7E6F";
+    ctx.font = `600 30px ${FONT}`;
+    ctx.textAlign = "left";
+    ctx.fillText("测测你的成长阶位 →", barX, barY + 92);
+    // 二维码占位框（右下）
+    const qrS = 96, qrX = W - 120 - qrS, qrY = barY + 50;
+    roundRect(ctx, qrX, qrY, qrS, qrS, 14);
+    ctx.fillStyle = "#F0EAE0"; ctx.fill();
+    ctx.strokeStyle = hexA(stageColor, 0.4); ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = "#A99C8A";
+    ctx.font = `400 18px ${FONT}`;
+    ctx.textAlign = "center";
+    ctx.fillText("长按识别", qrX + qrS / 2, qrY + qrS + 26);
+
+    // ---- 免责小字 ----
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#B5A893";
+    ctx.font = `400 22px ${FONT}`;
+    ctx.fillText("仅供自我探索 · 结果会随成长变化", W / 2, H - 70);
+
+    // 导出 PNG
+    return canvas.toDataURL("image/png");
+  }
+
+  // 显示分享卡覆盖层（图片 + 保存按钮 + 长按提示）。dataUrl 为 null 时给降级提示。
+  function showShareOverlay(dataUrl, data) {
+    // 移除旧覆盖层
+    const old = document.getElementById("shareOverlay");
+    if (old) old.remove();
+
+    const overlay = document.createElement("div");
+    overlay.id = "shareOverlay";
+    overlay.className = "share-overlay";
+    overlay.innerHTML = `
+      <div class="share-modal">
+        <button class="share-close" id="shareCloseBtn" aria-label="关闭">×</button>
+        <div class="share-canvas-wrap">
+          ${dataUrl
+            ? `<img class="share-card-img" id="shareCardImg" src="${dataUrl}" alt="我的心智成长分享卡" />`
+            : `<div class="share-fallback">抱歉，这台设备/浏览器暂时没法生成图片。<br/>你可以直接<strong>截屏</strong>当前结果页分享。</div>`}
+        </div>
+        ${dataUrl ? `<p class="share-tip">长按图片即可保存 / 分享到朋友圈</p>` : ``}
+        <div class="share-actions">
+          ${dataUrl ? `<button class="btn btn-primary" id="shareSaveBtn">保存图片</button>` : ``}
+          <button class="btn btn-ghost" id="shareDismissBtn">关闭</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    overlay.querySelector("#shareCloseBtn").onclick = close;
+    overlay.querySelector("#shareDismissBtn").onclick = close;
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+
+    const saveBtn = overlay.querySelector("#shareSaveBtn");
+    if (saveBtn && dataUrl) {
+      saveBtn.onclick = () => {
+        const fname = `心智成长_${data.type || "result"}.png`;
+        try {
+          // 优先 toBlob 下载（更稳）；dataURL 已有，转 blob。
+          const a = document.createElement("a");
+          a.href = dataUrl; a.download = fname;
+          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+          showToast("已触发保存；手机上若没弹出，请长按图片保存");
+        } catch (e) {
+          showToast("请长按上方图片保存");
+        }
+      };
+    }
+  }
+
   let toastTimer = null;
   function showToast(msg) {
     let t = document.getElementById("toast");
