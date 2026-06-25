@@ -586,12 +586,19 @@
     const q = activeB()[i];
     const cur = state.answersB[q.id];
     const letters = ["A", "B", "C", "D", "E"];
+    // 方案A：B 段保持单选，但把"选最像的那一个"说透，消解用户想多选的冲动。
+    // 第一题顶部给一句温馨提示，解释"为什么是单选"。
+    const firstHint = i === 0
+      ? `<div class="b-singlechoice-hint">每个人都有好几种反应，这很正常。<b>选那个最接近你第一反应、最像你的那一个就好</b>——不用纠结要不要把都对的都选上。</div>`
+      : "";
     const screen = el(`
       <div class="screen active">
         <span class="section-tag">第二部分 · 心智阶位</span>
+        ${firstHint}
         <div class="q-stem">
-          <span class="scenario-label">情境 · 选最接近你真实反应的一项</span>
+          <span class="scenario-label">情境 · 单选 · 选最像你的那一个</span>
           ${esc(q.stem)}
+          <span class="q-stem-suffix">下面哪个，最接近你真实的第一反应？</span>
         </div>
         <div class="likert" id="opts"></div>
         <div class="actions">

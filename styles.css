@@ -188,6 +188,20 @@ body {
   display: block; font-size: 13px; font-weight: 600;
   color: var(--ink-faint); margin-bottom: 6px; letter-spacing: .03em;
 }
+/* B 段题干后缀：再次点明"问的是最像你的第一反应"（方案A） */
+.q-stem .q-stem-suffix {
+  display: block; font-size: 14px; font-weight: 600;
+  color: var(--ink-faint); margin-top: 10px;
+}
+/* B 段第一题顶部温馨提示：解释为什么是单选，消解多选冲动（方案A） */
+.b-singlechoice-hint {
+  font-size: 13.5px; line-height: 1.6; color: var(--ink-soft, #5b5b66);
+  background: var(--card-soft, #f6f5fb);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px; margin: 4px 0 18px;
+}
+.b-singlechoice-hint b { color: var(--ink); font-weight: 700; }
 
 /* 选项通用 */
 .likert { display: flex; flex-direction: column; gap: 11px; }
