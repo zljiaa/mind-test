@@ -32,6 +32,7 @@
     try {
       localStorage.setItem(LS_KEY, JSON.stringify({
         mode: state.mode,
+        role: state.role,
         answersA: state.answersA,
         answersB: state.answersB,
         answersC: state.answersC,
@@ -49,18 +50,27 @@
      ========================================================================== */
   const state = {
     mode: null,            // 'quick' | 'full'
+    role: "general",       // 角色身份（B 段情境题按此切换）；默认普适/中性
     started: false,
     answersA: {},          // { A1: 1..5 }
     answersB: {},          // { B1: optionIndex }
     answersC: {},          // { C1: "text" }
   };
 
+  // 角色合法性兜底：未知/缺失一律回落 general
+  function roleKey() {
+    return (typeof STAGE_SJT_BY_ROLE !== "undefined" && STAGE_SJT_BY_ROLE[state.role])
+      ? state.role : "general";
+  }
+
   // 按当前模式得到本次要用的题目子集
   function activeA() {
     return state.mode === "quick" ? A_QUESTIONS.filter((q) => q.quick) : A_QUESTIONS;
   }
   function activeB() {
-    return state.mode === "quick" ? B_QUESTIONS.filter((q) => q.quick) : B_QUESTIONS;
+    // B 段按所选角色取题（兜底 general），再按模式做 quick 筛选。
+    const set = (typeof STAGE_SJT_BY_ROLE !== "undefined" && STAGE_SJT_BY_ROLE[roleKey()]) || B_QUESTIONS;
+    return state.mode === "quick" ? set.filter((q) => q.quick) : set;
   }
   function activeC() {
     return state.mode === "full" ? C_QUESTIONS : [];   // 快速版无 C 段
@@ -290,13 +300,14 @@
   const progressLabel = document.getElementById("progressLabel");
   const progressCount = document.getElementById("progressCount");
 
-  // flow: [{kind:'welcome'} | {kind:'A',i} | {kind:'B',i} | {kind:'C',i} | {kind:'result'}]
+  // flow: [{kind:'welcome'} | {kind:'role'} | {kind:'A',i} | {kind:'B',i} | {kind:'C',i} | {kind:'result'}]
   let flow = [];
   let cursor = 0;
 
   function buildFlow() {
     flow = [{ kind: "welcome" }];
     if (state.mode) {
+      flow.push({ kind: "role" });            // 选完版本后、进入 A 段前：角色选择屏
       activeA().forEach((_, i) => flow.push({ kind: "A", i }));
       activeB().forEach((_, i) => flow.push({ kind: "B", i }));
       activeC().forEach((_, i) => flow.push({ kind: "C", i }));
@@ -328,7 +339,7 @@
 
   function updateProgress() {
     const f = flow[cursor];
-    if (f.kind === "welcome" || f.kind === "result") {
+    if (f.kind === "welcome" || f.kind === "role" || f.kind === "result") {
       progressWrap.style.display = "none";
       return;
     }
@@ -352,6 +363,7 @@
     updateProgress();
     const f = flow[cursor];
     if (f.kind === "welcome") return renderWelcome();
+    if (f.kind === "role") return renderRole();
     if (f.kind === "A") return renderA(f.i);
     if (f.kind === "B") return renderB(f.i);
     if (f.kind === "C") return renderC(f.i);
@@ -444,7 +456,7 @@
         state.answersA = {}; state.answersB = {}; state.answersC = {};
       }
       buildFlow();
-      cursor = 1;            // 进入第一题
+      cursor = 1;            // 进入角色选择屏（A 段之前）
       saveState();
       render();
       window.scrollTo({ top: 0 });
@@ -453,6 +465,8 @@
     if (hasResume) {
       screen.querySelector("#resumeBtn").onclick = () => {
         state.mode = saved.mode;
+        state.role = (typeof STAGE_SJT_BY_ROLE !== "undefined" && STAGE_SJT_BY_ROLE[saved.role])
+          ? saved.role : "general";
         state.started = true;
         state.answersA = saved.answersA || {};
         state.answersB = saved.answersB || {};
@@ -463,6 +477,67 @@
         window.scrollTo({ top: 0 });
       };
     }
+  }
+
+  // ---- 角色选择屏（选完版本后、A 段之前） ----
+  function renderRole() {
+    const groupsHtml = ROLE_GROUPS.map((g) => {
+      const cards = g.roles.map((r) => `
+        <div class="role-card ${state.role === r.key ? "selected" : ""}" data-role="${r.key}">
+          <span class="role-radio"></span>
+          <span class="role-label">${esc(r.label)}</span>
+        </div>`).join("");
+      return `
+        <div class="role-group">
+          <div class="role-group-title">${esc(g.group)}</div>
+          <div class="role-group-cards">${cards}</div>
+        </div>`;
+    }).join("");
+
+    const screen = el(`
+      <div class="screen active role-screen">
+        <span class="section-tag">代入一种身份</span>
+        <h2 class="role-title">接下来有些情境题，你想代入哪种身份来回答？</h2>
+        <p class="role-sub">选最贴近你当下生活的，这样答起来更真实。</p>
+
+        <div class="role-groups">
+          ${groupsHtml}
+          <div class="role-group role-group-fallback">
+            <div class="role-group-cards">
+              <div class="role-card ${state.role === "general" ? "selected" : ""}" data-role="general">
+                <span class="role-radio"></span>
+                <span class="role-label">都不太贴合？用通用版</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn btn-ghost" id="backBtn">上一步</button>
+          <button class="btn btn-primary" id="nextBtn">开始第一部分</button>
+        </div>
+      </div>
+    `);
+    stageEl.innerHTML = "";
+    stageEl.appendChild(screen);
+
+    screen.querySelectorAll(".role-card").forEach((card) => {
+      card.onclick = () => {
+        const key = card.getAttribute("data-role");
+        state.role = (STAGE_SJT_BY_ROLE && STAGE_SJT_BY_ROLE[key]) ? key : "general";
+        screen.querySelectorAll(".role-card").forEach((c) => c.classList.remove("selected"));
+        card.classList.add("selected");
+        saveState();
+      };
+    });
+
+    screen.querySelector("#backBtn").onclick = () => go(-1);
+    screen.querySelector("#nextBtn").onclick = () => {
+      // 角色已默认 general，可直接前进；rebuild 以确保 B 段题集与角色一致。
+      saveState();
+      buildFlow();
+      go(1);
+    };
   }
 
   // ---- A 段一题一屏 ----
@@ -594,6 +669,13 @@
     const fused = fuse(a, b, cResult, cons);
     const stage = b.stage;
     const blurb = MBTI_BLURB[a.type] || "你的类型里含一个“中间维”，说明该维度上你比较灵活、不偏极端。";
+
+    // 本次 B 段情境所代入的身份角色（general 为通用，不额外提示）。
+    const rk = roleKey();
+    const roleLabel = (typeof ROLE_LABELS !== "undefined" && ROLE_LABELS[rk]) ? ROLE_LABELS[rk] : "通用";
+    const roleNote = (rk !== "general")
+      ? `<p class="stage-role-note">情境题已按你选的<strong>【${esc(roleLabel)}】</strong>视角定制——下面的成长重心，是你以这个身份作答得出的。</p>`
+      : ``;
 
     /**
      * 每维度「偏好强度」分档（用户校准：距中点 ≤3 分 = 弱偏好/接近中间）。
@@ -793,6 +875,7 @@
               <p class="stage-sub">${esc(stage.academic)}</p>
             </div>
           </div>
+          ${roleNote}
 
           <div class="spectrum-bar-wrap">
             <div class="spectrum-bar">
@@ -892,6 +975,8 @@
     screen.querySelector("#exportBtn").onclick = () => {
       const payload = {
         mode: state.mode,
+        role: rk,
+        roleLabel: roleLabel,
         type: a.type,
         dimensions: Object.fromEntries(Object.entries(a.dims).map(([k, d]) => [k, {
           winner: d.winner, sum: d.sum, max: d.max, midpoint: d.mid,
@@ -918,7 +1003,7 @@
 
     screen.querySelector("#restartBtn").onclick = () => {
       state.answersA = {}; state.answersB = {}; state.answersC = {};
-      state.started = false; state.mode = null;
+      state.started = false; state.mode = null; state.role = "general";
       clearState();
       buildFlow();
       cursor = 0;
@@ -970,9 +1055,12 @@
      5. 启动
      ========================================================================== */
   // 启动时不自动恢复进度（避免一来就跳到题中间）；
-  // 而是在欢迎页显示「继续」按钮让用户决定。这里仅恢复 mode 以便默认勾选。
+  // 而是在欢迎页显示「继续」按钮让用户决定。这里仅恢复 mode/role 以便默认勾选。
   const saved = loadState();
   if (saved && saved.mode) state.mode = saved.mode;
+  if (saved && saved.role && typeof STAGE_SJT_BY_ROLE !== "undefined" && STAGE_SJT_BY_ROLE[saved.role]) {
+    state.role = saved.role;
+  }
   buildFlow();
   cursor = 0;
   render();
