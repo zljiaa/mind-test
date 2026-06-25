@@ -684,6 +684,24 @@
       ? `<p class="stage-role-note">情境题已按你选的<strong>【${esc(roleLabel)}】</strong>视角定制——下面的成长重心，是你以这个身份作答得出的。</p>`
       : ``;
 
+    // 阶位文案取值：优先取「角色化评语」STAGE_COPY_BY_ROLE[role][stageCode]，
+    // 逐段回落到 STAGES 里的通用版（任一段缺失都不致空白）。
+    // 注意：edge（下一阶名）仍只来自 STAGES，不在角色评语里覆盖。
+    const roleCopySet = (typeof STAGE_COPY_BY_ROLE !== "undefined" && STAGE_COPY_BY_ROLE[rk])
+      ? STAGE_COPY_BY_ROLE[rk] : null;
+    const roleStageCopy = (roleCopySet && roleCopySet[stage.code]) ? roleCopySet[stage.code] : {};
+    const stageCopy = {
+      portrait: roleStageCopy.portrait || stage.portrait,
+      light: roleStageCopy.light || stage.light,
+      cost: roleStageCopy.cost || stage.cost,
+      edgeText: roleStageCopy.edgeText || stage.edgeText,
+    };
+
+    // 类型徽章视觉（渐变底 + 主 emoji）；含 X 中间维或未知类型回落 DEFAULT。
+    const visual = (typeof MBTI_VISUAL !== "undefined" && MBTI_VISUAL[a.type])
+      ? MBTI_VISUAL[a.type]
+      : ((typeof MBTI_VISUAL !== "undefined" && MBTI_VISUAL.DEFAULT) || { emoji: "🧬", gradient: ["#9A938B", "#C8B9A8"] });
+
     /**
      * 每维度「偏好强度」分档（用户校准：距中点 ≤3 分 = 弱偏好/接近中间）。
      *   gap = |sum − mid|（5 题制：0..10；3 题制：0..6）
@@ -847,6 +865,9 @@
       <div class="screen active" style="padding-top:8px;">
         <div class="result-hero">
           <div class="eyebrow">你的性格类型</div>
+          <div class="type-avatar" style="background:linear-gradient(135deg, ${visual.gradient[0]}, ${visual.gradient[1]});">
+            <span class="type-avatar-emoji">${visual.emoji}</span>
+          </div>
           <div class="mbti-badge">${a.type}</div>
           <div class="mbti-name">${esc(blurb)}</div>
           ${weakCount >= 1 ? `<div class="mbti-caveat">这是一个<strong>倾向</strong>，不是对你的<strong>定义</strong>——你有 ${weakCount} 个维度偏好并不强烈，下面细看。</div>` : ``}
@@ -876,7 +897,7 @@
             <span class="confidence-chip ${confClass}">置信度 · ${fused.confidence}</span>
           </div>
           <div class="stage-head" style="margin-top:14px;">
-            <div class="stage-emoji" style="background:${stage.color}1A;">${stage.emoji}</div>
+            <div class="stage-emoji" style="background:${stage.color}1A;">${stage.icon || stage.emoji}</div>
             <div>
               <p class="stage-title" style="color:${stage.color};">${stage.name}</p>
               <p class="stage-sub">${esc(stage.academic)}</p>
@@ -899,14 +920,14 @@
 
           <div class="stage-body">
             <span class="block-label">你的画像</span>
-            ${esc(stage.portrait)}
+            ${esc(stageCopy.portrait)}
             <span class="block-label">你的光彩</span>
-            ${esc(stage.light)}
+            ${esc(stageCopy.light)}
             <span class="block-label">你的代价（温和）</span>
-            ${esc(stage.cost)}
+            ${esc(stageCopy.cost)}
             <div class="growth-edge">
               <strong>你的成长边缘 → ${esc(stage.edge)}</strong><br/>
-              ${esc(stage.edgeText)}
+              ${esc(stageCopy.edgeText)}
             </div>
           </div>
         </div>
@@ -962,7 +983,10 @@
           本产品独立设计，不隶属于、也不代表 MBTI®、Myers-Briggs® 或任何官方机构。
         </div>
 
+        <div class="save-status" id="saveStatus"></div>
+
         <div class="actions">
+          <button class="btn btn-ghost" id="historyBtn" style="display:none;">我的记录</button>
           <button class="btn btn-ghost" id="exportBtn">导出 JSON</button>
           <button class="btn btn-primary" id="restartBtn">重新测试</button>
         </div>
@@ -978,34 +1002,35 @@
       requestAnimationFrame(() => { setTimeout(() => { ptr.style.left = b.pointerPos + "%"; }, 60); });
     }
 
+    // 本次结果 payload（导出与保存共用同一份）
+    const payload = {
+      mode: state.mode,
+      role: rk,
+      roleLabel: roleLabel,
+      type: a.type,
+      dimensions: Object.fromEntries(Object.entries(a.dims).map(([k, d]) => [k, {
+        winner: d.winner, sum: d.sum, max: d.max, midpoint: d.mid,
+        anchorFraction: Number(d.anchorFrac.toFixed(3)),
+        nearMidpoint: d.nearMid,
+      }])),
+      stage: {
+        principalName: stage.name, principalCode: stage.code,
+        principalValue: Number(b.principal.toFixed(2)),
+        mean: Number(b.mean.toFixed(2)), std: Number(b.std.toFixed(2)),
+        highInflectionP75: Number(b.p75.toFixed(2)),
+        isInterval: b.isInterval,
+        interval: b.isInterval ? [b.lower.name, b.upper.name] : null,
+      },
+      confidence: fused.confidence,
+      consistency: { checked: cons.checked, inconsistent: cons.inconsistent },
+      sectionC: { answered: cResult._answered, chars: cResult._chars, scored: false, note: "待 AI 按主体-客体复杂度校准" },
+      answers: { A: state.answersA, B: state.answersB, C: state.answersC },
+      generatedAt: new Date().toISOString(),
+    };
+
     // 导出 JSON（复制结果）
     screen.querySelector("#exportBtn").onclick = () => {
-      const payload = {
-        mode: state.mode,
-        role: rk,
-        roleLabel: roleLabel,
-        type: a.type,
-        dimensions: Object.fromEntries(Object.entries(a.dims).map(([k, d]) => [k, {
-          winner: d.winner, sum: d.sum, max: d.max, midpoint: d.mid,
-          anchorFraction: Number(d.anchorFrac.toFixed(3)),
-          nearMidpoint: d.nearMid,
-        }])),
-        stage: {
-          principalName: stage.name, principalCode: stage.code,
-          principalValue: Number(b.principal.toFixed(2)),
-          mean: Number(b.mean.toFixed(2)), std: Number(b.std.toFixed(2)),
-          highInflectionP75: Number(b.p75.toFixed(2)),
-          isInterval: b.isInterval,
-          interval: b.isInterval ? [b.lower.name, b.upper.name] : null,
-        },
-        confidence: fused.confidence,
-        consistency: { checked: cons.checked, inconsistent: cons.inconsistent },
-        sectionC: { answered: cResult._answered, chars: cResult._chars, scored: false, note: "待 AI 按主体-客体复杂度校准" },
-        answers: { A: state.answersA, B: state.answersB, C: state.answersC },
-        generatedAt: new Date().toISOString(),
-      };
-      const txt = JSON.stringify(payload, null, 2);
-      copyText(txt);
+      copyText(JSON.stringify(payload, null, 2));
     };
 
     screen.querySelector("#restartBtn").onclick = () => {
@@ -1017,6 +1042,85 @@
       render();
       window.scrollTo({ top: 0 });
     };
+
+    // 「我的记录」入口：仅在后端可用时点亮（否则保持离线静态行为）。
+    const histBtn = screen.querySelector("#historyBtn");
+    if (histBtn) histBtn.onclick = () => renderHistory();
+
+    // 结果入库（渐进增强）：后端可达就静默保存，并更新状态条；
+    // 不可达 / 失败都不影响本次结果展示（静态行为不变）。
+    const saveStatus = screen.querySelector("#saveStatus");
+    (async () => {
+      if (!window.MMS_API) return;                 // 没加载 api.js → 纯静态
+      const online = await window.MMS_API.isOnline();
+      if (!online) {
+        if (saveStatus) saveStatus.textContent = "📴 离线模式：结果仅保存在本机浏览器，未上传。";
+        return;
+      }
+      if (saveStatus) saveStatus.textContent = "正在保存到你的记录…";
+      const r = await window.MMS_API.saveResult(payload);
+      if (r && r.id) {
+        if (saveStatus) saveStatus.textContent = "✅ 已保存到你的记录";
+        if (histBtn) histBtn.style.display = "";   // 点亮入口
+      } else {
+        if (saveStatus) saveStatus.textContent = "⚠️ 保存失败（后端未就绪），结果仍在本机。";
+      }
+    })();
+  }
+
+  /* ==========================================================================
+     4b. 我的记录（仅后端可用时；离线无此页）
+     ========================================================================== */
+  async function renderHistory() {
+    stageEl.innerHTML = "";
+    const wrap = el(`
+      <div class="screen active" style="padding-top:8px;">
+        <div class="result-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <h3 style="margin:0;">我的测试记录</h3>
+            <button class="btn btn-ghost" id="histBackBtn" style="width:auto;padding:6px 14px;">← 返回</button>
+          </div>
+          <div id="histList" class="hist-list"><div class="hist-loading">加载中…</div></div>
+        </div>
+      </div>
+    `);
+    stageEl.appendChild(wrap);
+    wrap.querySelector("#histBackBtn").onclick = () => { buildFlow(); cursor = 0; render(); };
+
+    const listEl = wrap.querySelector("#histList");
+    const rows = window.MMS_API ? await window.MMS_API.listResults() : null;
+    if (!rows) {
+      listEl.innerHTML = `<div class="hist-empty">无法连接后端，暂时看不到历史记录。</div>`;
+      return;
+    }
+    if (rows.length === 0) {
+      listEl.innerHTML = `<div class="hist-empty">还没有记录——测一次就会出现在这里。</div>`;
+      return;
+    }
+    listEl.innerHTML = rows.map((r) => {
+      const d = (r.created_at || "").slice(0, 10);
+      const modeLabel = r.mode === "quick" ? "快速版" : "完整版";
+      const stageTxt = r.stage_name ? esc(r.stage_name) + (r.stage_is_interval ? "（区间）" : "") : "—";
+      return `
+        <div class="hist-item" data-id="${esc(r.id)}">
+          <div class="hist-main">
+            <span class="hist-type">${esc(r.mbti_type || "—")}</span>
+            <span class="hist-stage">${stageTxt}</span>
+          </div>
+          <div class="hist-meta">${modeLabel} · 置信度 ${esc(r.confidence || "—")} · ${d}</div>
+        </div>`;
+    }).join("");
+
+    // 点条目 → 看完整结果（这里先用 JSON 详情弹窗；可后续做成完整结果页）
+    listEl.querySelectorAll(".hist-item").forEach((item) => {
+      item.onclick = async () => {
+        const id = item.getAttribute("data-id");
+        const full = await window.MMS_API.getResult(id);
+        if (full && full.result) {
+          window.prompt("这次结果的完整数据（Ctrl/Cmd+C 复制）：", JSON.stringify(full.result, null, 2));
+        }
+      };
+    });
   }
 
   // 复制文本到剪贴板（file:// 下 navigator.clipboard 可能不可用 → textarea 兜底）

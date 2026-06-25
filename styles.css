@@ -302,6 +302,25 @@ textarea:focus { outline: none; border-color: var(--accent); }
 }
 .btn-text:hover { color: var(--accent-deep); }
 
+/* 结果保存状态 + 我的记录 */
+.save-status {
+  margin-top: 18px; text-align: center;
+  font-size: 12.5px; color: var(--ink-faint); min-height: 18px;
+}
+.hist-list { margin-top: 6px; display: flex; flex-direction: column; gap: 10px; }
+.hist-loading, .hist-empty {
+  text-align: center; color: var(--ink-faint); font-size: 13px; padding: 18px 0;
+}
+.hist-item {
+  border: 1.5px solid var(--line); border-radius: var(--radius-sm);
+  padding: 13px 15px; cursor: pointer; transition: all .18s ease; background: var(--card);
+}
+.hist-item:hover { border-color: var(--accent); background: #FFFDFB; }
+.hist-main { display: flex; align-items: baseline; gap: 10px; }
+.hist-type { font-size: 17px; font-weight: 800; color: var(--ink); letter-spacing: .04em; }
+.hist-stage { font-size: 13.5px; font-weight: 600; color: var(--accent-deep); }
+.hist-meta { font-size: 11.5px; color: var(--ink-faint); margin-top: 4px; }
+
 /* 恢复进度提示条 */
 .resume-bar {
   display: flex; align-items: center; gap: 10px; justify-content: center;
@@ -320,6 +339,30 @@ textarea:focus { outline: none; border-color: var(--accent); }
 .result-hero .eyebrow {
   font-size: 12.5px; color: var(--ink-faint); letter-spacing: .08em;
   text-transform: uppercase; margin-bottom: 4px;
+}
+/* 类型徽章/头像：渐变圆底 + 主 emoji（圆形头像底 + 柔和阴影） */
+.type-avatar {
+  width: 88px; height: 88px; border-radius: 50%;
+  margin: 10px auto 12px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 10px 26px rgba(80, 60, 40, 0.22), inset 0 1px 2px rgba(255,255,255,0.45);
+  position: relative;
+  animation: avatarPop .5s cubic-bezier(.34,1.4,.64,1) both;
+}
+.type-avatar::after {
+  /* 顶部高光，让球面更有质感 */
+  content: ""; position: absolute; top: 9px; left: 18px;
+  width: 30px; height: 18px; border-radius: 50%;
+  background: rgba(255,255,255,0.35); filter: blur(2px);
+}
+.type-avatar-emoji {
+  font-size: 42px; line-height: 1;
+  filter: drop-shadow(0 2px 3px rgba(0,0,0,0.22));
+  position: relative; z-index: 1;
+}
+@keyframes avatarPop {
+  from { opacity: 0; transform: scale(.6) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
 }
 .mbti-badge {
   font-size: 52px; font-weight: 800; letter-spacing: 0.08em;
